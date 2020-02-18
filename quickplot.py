@@ -73,7 +73,8 @@ if title == '':
 
 style = input('Line, dot, or both?\n')
 
-colors = cm.rainbow( np.linspace(0, 1, len(sys.argv)-1) )
+colors = cm.gist_rainbow( np.linspace(0, 1, len(sys.argv)-1) )
+
 legend = []
 for i, filename in enumerate(sys.argv[1:]):
 
