@@ -256,14 +256,14 @@ class PlotCanvas(FigureCanvas):
 
 
 	def plot_onOpen(self):
-		ax = self.figure.add_subplot(111)
+		ax = self.axes
 		ax.plot(dinoX, dinoY, 'ko')
 		ax.set_title('Datasaurus wishes you happy plotting!')
 
 
 	def plot(self):
 		self.axes.clear()
-		ax = self.figure.add_subplot(111)
+		ax = self.axes
 		for i in range(len(self.xData)):
 			ax.plot(self.xData[i], self.yData[i], self.plotStyle)
 
