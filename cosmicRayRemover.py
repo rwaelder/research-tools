@@ -186,7 +186,9 @@ while i < (len(xValues) - chunkSize):
 			show_ray(xValues, yValues, xTest, yTest)
 
 			rayInSlice = input('Found ray? [y/N]').rstrip()
-			if rayInSlice[0] in ['y', 'Y']:
+			if rayInSlice == '' or rayInSlice[0] not in ['y', 'Y']:
+				pass
+			else:
 				yValues = replace_ray(xValues, yValues, dyValues, start, end)
 
 
@@ -203,7 +205,7 @@ else:
 	plt.show()
 
 	done = input('Write file? [Y/n]').rstrip()
-	if done[0] in ['n', 'N']:
-		sys.exit()
+	if done == '' or done[0] not in ['n', 'N']:
+		write_file(filename, xValues, yValues)		
 	else:
-		write_file(filename, xValues, yValues)
+		sys.exit()
