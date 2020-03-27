@@ -151,7 +151,8 @@ def show_ray(x, y, rayX, rayY):
 # ---------- Main Program --------------------------------------
 
 if len(sys.argv) < 2:
-	print('Filename not specified, quitting...')
+	print('Filename not specified.')
+	print('Usage: python cosmicRayRemover.py datafile {unsupervised}')
 	sys.exit()
 else:
 	filename = sys.argv[1]
@@ -160,6 +161,8 @@ if 'unsupervised' in sys.argv:
 	unsupervised = True
 else:
 	unsupervised = False
+
+
 
 xValues, yValues = read_2d_file(filename)
 
