@@ -1,5 +1,5 @@
 '''
-Requirements: matplotlib, random, statistics, math, ufit
+Requirements: matplotlib, argparse, random, statistics, math, ufit
 
 Function for removal of cosmic rays from 2D data, developed for
 photoluminescence experiments where cosmic rays can affect
@@ -38,6 +38,7 @@ Options:
 '''
 
 import sys
+import argparse
 import matplotlib.pyplot as plt
 from random import uniform
 from statistics import mean, median
@@ -60,7 +61,7 @@ def read_2d_file(filename):
 			else:
 				continue
 
-	return x, y
+	return x, y, delimiter
 
 
 def get_delimiter(filename):
@@ -90,15 +91,14 @@ def is_number(value):
 		return False
 
 
-def write_file(filename, xValues, yValues):
-	filenameModifier = '_rayremoved'
+def write_file(filename, xValues, yValues, filename_modifier, delimiter):
 
 	ext = '.' + filename.split('.')[-1]
-	filename = filename.replace(ext, filenameModifier+ext)
+	filename = filename.replace(ext, filename_modifier + ext)
 
 	with open(filename, 'w') as f:
 		for i in range(len(xValues)):
-			f.write('%s, %s \n' % (xValues[i], yValues[i]))
+			f.write('%s%s %s \n' % (xValues[i], delimiter, yValues[i]))
 
 
 # ---------- Program Functions ---------------------------------
@@ -150,65 +150,71 @@ def show_ray(x, y, rayX, rayY):
 
 # ---------- Main Program --------------------------------------
 
-if len(sys.argv) < 2:
-	print('Filename not specified.')
-	print('Usage: python cosmicRayRemover.py datafile {unsupervised}')
-	sys.exit()
-else:
-	filename = sys.argv[1]
+def main(args):
 
-if 'unsupervised' in sys.argv:
-	unsupervised = True
-else:
-	unsupervised = False
+	files = args.data_files
+
+	chunkSize = args.chunk_size
+
+	for file in files:
+		xValues, yValues, delimiter = read_2d_file(file)
 
 
+		dyValues = [sqrt(y) for y in yValues]
 
-xValues, yValues = read_2d_file(filename)
+		ufit.set_backend('lmfit')
+		
+		i = 0
+		while i < (len(xValues) - chunkSize):
+			start = i
+			end = i + chunkSize-1
+			xTest, yTest, dyTest = xValues[start:end], yValues[start:end], dyValues[start:end]
+
+			foundRay = find_ray(xTest, yTest)
+			if foundRay:
+
+				if args.unsupervised:
+					yValues = replace_ray(xValues, yValues, dyValues, start, end)
+
+				else:
+					show_ray(xValues, yValues, xTest, yTest)
+
+					rayInSlice = input('Found ray? [y/N]').rstrip()
+					if rayInSlice == '' or rayInSlice[0] not in ['y', 'Y']:
+						pass
+					else:
+						yValues = replace_ray(xValues, yValues, dyValues, start, end)
 
 
-dyValues = [sqrt(y) for y in yValues]
+			i += chunkSize
+			if i + chunkSize >= len(xValues):
+				i = len(xValues) - chunkSize
 
-ufit.set_backend('lmfit')
-
-
-chunkSize = 50
-i = 0
-while i < (len(xValues) - chunkSize):
-	start = i
-	end = i + chunkSize-1
-	xTest, yTest, dyTest = xValues[start:end], yValues[start:end], dyValues[start:end]
-
-	foundRay = find_ray(xTest, yTest)
-	if foundRay:
-
-		if unsupervised:
-			yValues = replace_ray(xValues, yValues, dyValues, start, end)
+		if args.unsupervised:
+			write_file(file, xValues, yValues, args.filename_modifier, delimiter)
 
 		else:
-			show_ray(xValues, yValues, xTest, yTest)
+			print('No (more) candidates found.')
+			plt.plot(xValues, yValues)
+			plt.show()
 
-			rayInSlice = input('Found ray? [y/N]').rstrip()
-			if rayInSlice == '' or rayInSlice[0] not in ['y', 'Y']:
-				pass
+			done = input('Write file? [Y/n]').rstrip()
+			if done == '' or done[0] not in ['n', 'N']:
+				write_file(file, xValues, yValues, args.filename_modifier, delimiter)		
 			else:
-				yValues = replace_ray(xValues, yValues, dyValues, start, end)
+				sys.exit()
 
 
-	i += chunkSize
-	if i + chunkSize >= len(xValues):
-		i = len(xValues) - chunkSize
+if __name__ == '__main__':
 
-if unsupervised:
-	write_file(filename, xValues, yValues)
+	parser = argparse.ArgumentParser(description='Remove cosmic rays from 2D spectral data')
+	parser.add_argument('data_files', nargs='+', help='Data files to remove rays from')
 
-else:
-	print('No (more) candidates found.')
-	plt.plot(xValues, yValues)
-	plt.show()
+	parser.add_argument('-u', '--unsupervised', action='store_true', help='Do not prompt user to confirm suspected cosmic ray regions')
+	parser.add_argument('-f', '--filename_modifier', type=str, default='-rayremoved', help='Modifier to data output file name')
+	parser.add_argument('-c', '--chunk_size', type=int, default=50, help='Number of points to search for rays and replace if found')
 
-	done = input('Write file? [Y/n]').rstrip()
-	if done == '' or done[0] not in ['n', 'N']:
-		write_file(filename, xValues, yValues)		
-	else:
-		sys.exit()
+	args = parser.parse_args()
+
+	main(args)
+
