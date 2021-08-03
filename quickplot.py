@@ -16,46 +16,64 @@ as command line arguments
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
-import sys
+import sys, os
 import argparse
 
 # ---------- Helper functions ----------------------------------
 
-def read_2d_file(filename):
+def read_2d_file(filename, columns):
+	x_col, y_col = columns
+
 	x, y = [], []
-	delimiter = get_delimiter(filename)
+	delimiter = find_delimiter(filename)
+
+	with open(filename) as f:
+		line = f.readline()
+
+		num_cols = len( line.split(delimiter) )
+
+		assert x_col < num_cols, \
+		'specified x column index {x} greater than number of columns in data file {file}'.format(x=x_col, file=filename)
+
+		assert y_col < num_cols, \
+		'specified y column index {y} greater than number of columns in data file {file}'.format(y=y_col, file=filename)
 
 	with open(filename) as f:
 		for line in f:
 			lineSplit = line.split(delimiter)
 
-			if is_number(lineSplit[0]):
-				x.append( float( lineSplit[0] ))
-				y.append( float( lineSplit[1] ))
+			if is_number(lineSplit[x_col]) and is_number(lineSplit[y_col]):
+				x.append( float( lineSplit[x_col] ))
+				y.append( float( lineSplit[y_col] ))
 			else:
 				continue
 
 	return x, y
 
-def get_delimiter(filename):
-	if '.csv' in filename:
-		delimiter = ','
+def find_delimiter(filename):
+	delimiters = [',', ';', '\t', ' ']
 
-	elif '.txt' in filename:
-		with open(filename) as f:
-			line = f.readline()
+	with open(filename) as f:
+		line = f.readline()
 
-		if '\t' in line:
-			delimiter = '\t'
-		elif ' ' in line:
-			delimiter = ' '
-		else:
-			delimiter = input('Please specify delimiter for %s:\n' % filename)
+	# try common delimiters, return if found
+	for delimiter in delimiters:
+		if try_delimiter(delimiter, line):
+			return delimiter
 
-	else:
+	# if common delimiters are not found, prompt user for delimiter and check
+	while delimiter not in line:
 		delimiter = input('Please specify delimiter for %s:\n' % filename)
 
 	return delimiter
+
+	
+
+def try_delimiter(delimiter, line):
+	if delimiter in line:
+		return True
+	else:
+		return False
 
 def is_number(value):
 	try:
@@ -73,12 +91,28 @@ def normalize_data(data):
 	normalizer = max(data)
 	return [datum/normalizer for datum in data]
 
+# ---------- Font Formats --------------------------------------
+
+lgd_pres = {'family': 'sans',
+		'size': 12,
+		}
+txt_pres = {'family': 'sans',
+		'fontweight': 'normal',
+		'size': 14,
+		'fontstyle': 'normal'
+		}
+axs_pres = {'family': 'sans',
+		'fontweight': 'normal',
+		'size': 18,
+		'fontstyle': 'normal'
+		}
+
 # ---------- Main Program --------------------------------------
 
 def main(files, options):
 
-	if options.title:
-		title = '-'.join(sys.argv[1].split('.')[:-1])
+	if not options.title:
+		title = '-'.join(files[0].split('.')[:-1])
 	else:
 		title = options.title
 
@@ -89,9 +123,13 @@ def main(files, options):
 	colors = colorspace( np.linspace(0, 1, len(files)) )
 
 	if options.presentation:
-		plt.rcParams.update({'font.size' : 20})
+		lgd_fontdict = lgd_pres
+		axes_fontdict = axs_pres
+		text_fontdict = txt_pres
 	else:
-		pass
+		lgd_fontdict = None
+		axes_fontdict = None
+		text_fontdict = None
 
 	legend = []
 	for i, file in enumerate(files):
@@ -99,6 +137,10 @@ def main(files, options):
 		if options.legend_labels:
 			label = options.legend_labels + ' ' + str(i+1)
 			legend.append(label)
+
+		elif options.legend_lambda:
+			label = lambda file : eval(options.legend_lambda)
+			legend.append(label(file))
 		else:
 
 			# remove extension
@@ -110,7 +152,10 @@ def main(files, options):
 		x = []
 		y = []
 
-		x, y = read_2d_file(file)
+		if options.inverse:
+			y, x = read_2d_file(file, options.columns)
+		else:
+			x, y = read_2d_file(file, options.columns)
 
 		if options.offset != 0:
 			offset = options.offset * i
@@ -122,7 +167,7 @@ def main(files, options):
 		if style == '' or style.lower()[0] == 'line'[0]:
 			plt.plot(x,y, color=colors[i])
 
-		elif style.lower()[0] == 'dot'[0]:
+		elif style.lower()[0] == 'scatter'[0]:
 			plt.plot(x,y,'o', color=colors[i])
 
 		elif style.lower()[0] == 'both'[0]:
@@ -131,22 +176,34 @@ def main(files, options):
 		else:
 			plt.plot(x,y, color=colors[i])
 
-	plt.xlabel(options.xlabel)
-	plt.ylabel(options.ylabel)
+	plt.xlabel(options.xlabel, fontdict=axes_fontdict)
+	plt.ylabel(options.ylabel, fontdict=axes_fontdict)
 
 	if not options.no_title:
-		plt.title(title)
+		plt.title(title, fontdict=axes_fontdict)
 
 	if options.no_xticks:
 		plt.xticks([])
 	if options.no_yticks:
 		plt.yticks([])
 
+	if options.xlim:
+		plt.xlim(eval(options.xlim))
+	if options.ylim:
+		plt.ylim(eval(options.ylim))
+
 	if len(legend) > 1 and not options.no_legend:
-		plt.legend(legend)
+		plt.legend(legend, ncol=options.legend_columns, prop=lgd_fontdict)
 
 	if options.tight:
 		plt.tight_layout()
+
+
+	if options.logx:
+		plt.xscale('log')
+	if options.logy:
+		plt.yscale('log')
+
 
 	if options.save is None:
 		plt.show()
@@ -164,21 +221,34 @@ if __name__ == '__main__':
 	parser.add_argument('-y', '--ylabel', type=str, help='y axis label', default='')
 	parser.add_argument('--no_xticks', action='store_true', help='don\'t show any ticks on x axis')
 	parser.add_argument('--no_yticks', action='store_true', help='don\'t show any ticks on y axis')
+	parser.add_argument('--xlim', type=str, help='specify x limits for graph area as tuple: \"(left,right)\"', default='')
+	parser.add_argument('--ylim', type=str, help='specify y limits for graph area as tuple: \"(bottom,top)\"', default='')
+	parser.add_argument('--logx', action='store_true', help='use log scale for x axis')
+	parser.add_argument('--logy', action='store_true', help='use log scale for y axis')
 
-	parser.add_argument('-t', '--title', type=str, help='plot title', default='')
-	parser.add_argument('-s', '--style', type=str, help='plot as line, dot, or both', choices=['line', 'dot', 'both'], default='line')
-	parser.add_argument('-o', '--offset', type=float, help='vertical offset between datasets', default=0)
-	parser.add_argument('-c', '--color', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
-	parser.add_argument('-l', '--legend_labels', type=str, help='iterated labels to use in the legend for each dataset ', default='')
+
+
+	parser.add_argument('--title', type=str, help='plot title', default='')
+	parser.add_argument('--style', type=str, help='plot as line, scatter, or both', choices=['line', 'scatter', 'both'], default='line')
+	parser.add_argument('--offset', type=float, help='vertical offset between datasets', default=0)
+	parser.add_argument('--color', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
+
+	# legend stuff
+	parser.add_argument('--legend_labels', type=str, help='iterated labels to use in the legend for each dataset ', default='')
 	parser.add_argument('--legend_start_cutoff', type=int, help='character to start cutoff of filenames for legend', default=0)
 	parser.add_argument('--legend_end_cutoff', type=int, help='character to end cutoff of filenames for legend', default=None)
+	parser.add_argument('--legend_lambda', type=str, help='specify a lambda {file} function to parse filenames for legend labels', default='')
 	parser.add_argument('--no_legend', action='store_true', help='don\'t display a legend')
+	parser.add_argument('--legend_columns', type=int, help='number of columns to use for legend', default=1)
+
+
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
 	parser.add_argument('--tight', action='store_true', help='use a tight layout')
 	parser.add_argument('--no_title', action='store_true', help='force no title on plot')
 	parser.add_argument('--presentation', action='store_true', help='increase font size for use in slides')
-	parser.add_argument('--save', type=str, default=None, help='save plot as file. pdf format if not specified')
-
+	parser.add_argument('--save', type=str, default=None, help='save plot as file, pdf format if not specified')
+	parser.add_argument('--inverse', action='store_true', help='flip x and y')
+	parser.add_argument('--columns', nargs=2, default=[0, 1],type=int, help='columns of data file to read, 0-indexed')
 
 	args = parser.parse_args()
 
