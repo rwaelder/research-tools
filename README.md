@@ -5,3 +5,4 @@ Commonly used uncommon libraries:
 
 python:
   ufit - available through pip
+  lhsmdu - available through pip
