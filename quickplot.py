@@ -12,13 +12,17 @@ as command line arguments
 
 '''
 
-
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+import argparse
 import numpy as np
 import pandas as pd
+import string
 import sys
-import argparse
+
+import matplotlib.pyplot as plt
+import matplotlib
+
+
+
 
 # ---------- Helper functions ----------------------------------
 
@@ -98,6 +102,18 @@ def pandas_read_file(filename, column_labels):
 
 	return x, y
 
+def wire_read_file(filename):
+	try:
+		import renishaw_wire
+
+	except ModuleNotFoundError:
+		print('No module to read Renishaw files')
+		sys.exit()
+
+	x, y = renishaw_wire.wire_read(filename)
+
+	return x, y
+
 
 # ---------- Program Functions ---------------------------------
 
@@ -108,6 +124,21 @@ def normalize_data(data):
 	normalizer = max(data)
 	return [datum/normalizer for datum in data]
 
+def integrate(x, y, _range):
+	start, end = _range
+
+	if type(x) == list:
+		_x = pd.DataFrame(x)
+		_y = pd.DataFrame(y)
+	
+
+	rows = _x[0].between(start, end)
+
+	area = np.trapz(_y[0][rows], x=_x[0][rows])
+
+	return area
+
+
 def ddx(x, y):
 	dx = []
 	dy = []
@@ -117,28 +148,13 @@ def ddx(x, y):
 
 	return dx, dy
 
-# ---------- Font Formats --------------------------------------
-
-lgd_pres = {'family': 'sans',
-		'size': 12,
-		}
-txt_pres = {'family': 'sans',
-		'fontweight': 'normal',
-		'size': 14,
-		'fontstyle': 'normal'
-		}
-axs_pres = {'family': 'sans',
-		'fontweight': 'normal',
-		'size': 18,
-		'fontstyle': 'normal'
-		}
 
 # ---------- Main Program --------------------------------------
 
 def main(files, options):
 
 	if options.sort_lambda:
-		sort_func = lambda file : eval(options.sort_lambda)
+		sort_func = lambda file : float(eval(options.sort_lambda))
 		files.sort(key=sort_func)
 
 	if not options.title:
@@ -146,20 +162,24 @@ def main(files, options):
 	else:
 		title = options.title
 
-	style = options.style
 
-
-	colorspace = cm.get_cmap(name=options.color)
+	colorspace = matplotlib.colormaps.get_cmap(options.color)
 	colors = colorspace( np.linspace(0, 1, len(files)) )
 
+	if options.monochrome:
+		colors = ['tab:blue' for file in files]
+
+	if options.colors:
+		assert len(options.colors) == len(files), 'must specify same number of colors and files'
+		colors = options.colors
+
 	if options.presentation:
-		lgd_fontdict = lgd_pres
-		axes_fontdict = axs_pres
-		text_fontdict = txt_pres
-	else:
-		lgd_fontdict = None
-		axes_fontdict = None
-		text_fontdict = None
+		plt.rc('font', size=13)
+		plt.rc('axes', labelsize=13)
+		plt.rc('lines', markersize=9, linewidth=2)
+
+
+	fig, ax = plt.subplots()
 
 	legend = []
 	for i, file in enumerate(files):
@@ -186,7 +206,10 @@ def main(files, options):
 			x, y, = pandas_read_file(file, options.pandas)
 
 		else:
-			if options.inverse:
+			if file[-4:] == '.wdf':
+				x, y = wire_read_file(file)
+
+			elif options.inverse:
 				y, x = read_2d_file(file, options.columns)
 			else:
 				x, y = read_2d_file(file, options.columns)
@@ -194,6 +217,11 @@ def main(files, options):
 
 		if options.normalize:
 			y = normalize_data(y)
+
+		if options.normalize_area[0] != options.normalize_area[1]:
+			area = integrate(x, y, options.normalize_area)
+
+			y = [datum/area for datum in y]
 
 		if options.detrend > -1:
 			# get first and last 5 elements
@@ -203,15 +231,43 @@ def main(files, options):
 			y_fit.extend(y[-5:])
 
 			# fit polynomial
-			coefs = np.polyfit(x_fit, y_fit, options.detrend).tolist()
-			coefs.reverse() # largest order last
+			coefs = np.polyfit(x_fit, y_fit, options.detrend)
 
 			# subtract polynomial fit
+			y_fit = np.polyval(coefs, x)
+
+			y = np.subtract(y, y_fit)
+
+		if options.polyfit > -1:
+
+			# fit polynomial
+			coefs, cov = np.polyfit(x, y, options.polyfit, cov=True)
+			
+			y_poly = np.polyval(coefs, x)
+
+
+			ax.plot(x, y_poly, color='k')
+
+			coefs.reverse() # const. last
+			func_text = '$y = '
+			coefs_text = ''
 			for n, coef in enumerate(coefs):
-				if n == 0:
-					y = [yi - coef for yi in y]
+				power = len(coefs) - n
+				if power > 0:
+					func_text += '{c}x^{p} + '.format(c=string.ascii_lowercase[n], p=power)
+					coefs_text += '${c}$ = {val} ± {var}\n'.format(c=string.ascii_lowercase[n], val=round(coef, ))
 				else:
-					y = [y[i] - coef*x[i]**n for i in range(len(x))]
+					func_text += '{c}$'.format(c=string.ascii_lowercase[n])
+
+
+		if options.peak_area_over_time[0] != options.peak_area_over_time[1]:
+			area = integrate(x, y, options.peak_area_over_time)
+			y = area
+			x = i
+			options.xlabel = 'Experiment Number'
+			options.style = 'scatter'
+
+
 
 		if options.differentiate:
 			for n in range(options.differentiate):
@@ -221,45 +277,45 @@ def main(files, options):
 			offset = options.offset * i
 			y = offset_data(y, offset)
 
-		if style == '' or style.lower()[0] == 'line'[0]:
-			plt.plot(x,y, color=colors[i])
+		if options.style == '' or options.style.lower()[0] == 'line'[0]:
+			ax.plot(x,y, color=colors[i])
 
-		elif style.lower()[0] == 'scatter'[0]:
-			plt.plot(x,y,options.marker, color=colors[i])
+		elif options.style.lower()[0] == 'scatter'[0]:
+			ax.plot(x,y, marker=options.marker, color=colors[i])
 
-		elif style.lower()[0] == 'both'[0]:
-			plt.plot(x,y,'-o', color=colors[i])
+		elif options.style.lower()[0] == 'both'[0]:
+			ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
 
 		else:
-			plt.plot(x,y, color=colors[i])
+			ax.plot(x,y, color=colors[i])
 
-	plt.xlabel(options.xlabel, fontdict=axes_fontdict)
-	plt.ylabel(options.ylabel, fontdict=axes_fontdict)
+	ax.set_xlabel(options.xlabel)
+	ax.set_ylabel(options.ylabel)
 
 	if not options.no_title:
-		plt.title(title, fontdict=axes_fontdict)
+		ax.set_title(title)
 
 	if options.no_xticks:
-		plt.xticks([])
+		ax.set_xticks([])
 	if options.no_yticks:
-		plt.yticks([])
+		ax.set_yticks([])
 
 	if options.xlim[0] != options.xlim[1]:
-		plt.xlim(options.xlim)
+		ax.set_xlim(options.xlim)
 	if options.ylim[0] != options.ylim[1]:
-		plt.ylim(options.ylim)
+		ax.set_ylim(options.ylim)
 
 	if len(legend) > 1 and not options.no_legend:
-		plt.legend(legend, ncol=options.legend_columns, prop=lgd_fontdict)
+		fig.legend(legend, ncol=options.legend_columns)
 
 	if options.tight:
-		plt.tight_layout()
+		fig.tight_layout()
 
 
 	if options.logx:
-		plt.xscale('log')
+		ax.set_xscale('log')
 	if options.logy:
-		plt.yscale('log')
+		ax.set_yscale('log')
 
 
 	if options.save is None:
@@ -267,7 +323,7 @@ def main(files, options):
 
 	else:
 
-		plt.savefig(options.save)
+		fig.savefig(options.save, dpi=args.dpi)
 
 if __name__ == '__main__':
 
@@ -291,6 +347,9 @@ if __name__ == '__main__':
 	parser.add_argument('--marker', help='marker for scatter plot', default='o')
 	parser.add_argument('--offset', type=float, help='vertical offset between datasets', default=0)
 	parser.add_argument('--color', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
+	parser.add_argument('--colors', type=str, nargs='+', help='specific colors to plot with specified individually', default=[])
+	parser.add_argument('--monochrome', action='store_true', help='force a single color for all elements')
+	parser.add_argument('--xkcd', action='store_true', help='xkcd styling')
 
 	# legend stuff
 	parser.add_argument('--legend_labels', type=str, help='iterated labels to use in the legend for each dataset ', default='')
@@ -307,11 +366,16 @@ if __name__ == '__main__':
 	parser.add_argument('--inverse', action='store_true', help='flip x and y')
 	parser.add_argument('--columns', nargs=2, default=[0, 1], type=int, help='columns of data file to read, 0-indexed')
 	parser.add_argument('--sort_lambda', type=str, help='lambda {file} function to parse filenames to sort files', default='')
+	parser.add_argument('--dpi', type=int, default=300, help='dpi of saved figure if using --save {figname}')
 
 	# math stuff
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
+	parser.add_argument('--normalize_area', nargs=2, default=[0,0], type=float, help='normalize by and area between two points')
 	parser.add_argument('--detrend', type=int, default=-1, help='fit and subtract polynomial function of degree {n} from whole domain')
 	parser.add_argument('--differentiate', type=int, default=0, help='plot {n}th degree derivative')
+	parser.add_argument('--polyfit', type=int, default=-1, help='fit {n}th degree polynomial')
+	parser.add_argument('--hide_poly_coef', action='store_false', help='hide text box with polynomial coefficients')
+	parser.add_argument('--peak_area_over_time', nargs=2, default=[0,0], type=float, help='integrate an area of data and plot area as time series')
 
 	# pandas stuff
 	parser.add_argument('--pandas', nargs=2, default=['', ''], help='use pandas to read file, plots {column_label_1} vs {column_label_2}. Only way to read excel files')
@@ -322,4 +386,10 @@ if __name__ == '__main__':
 
 	files = args.data_files
 
-	main(files, args)
+	if args.xkcd:
+		with plt.xkcd():
+			main(files, args)
+	else:
+		main(files, args)
+
+
