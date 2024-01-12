@@ -167,11 +167,14 @@ def main(files, options):
 	colors = colorspace( np.linspace(0, 1, len(files)) )
 
 	if options.monochrome:
-		colors = ['tab:blue' for file in files]
+		colors = ['tab:gray' for file in files]
 
 	if options.colors:
-		assert len(options.colors) == len(files), 'must specify same number of colors and files'
-		colors = options.colors
+		if len(options.colors) == 1:
+			colors = [options.colors[0] for file in files]
+		else:
+			assert len(options.colors) == len(files), 'must specify one or same number of colors and files'
+			colors = options.colors
 
 	if options.presentation:
 		plt.rc('font', size=13)
@@ -181,8 +184,16 @@ def main(files, options):
 
 	fig, ax = plt.subplots()
 
+	if options.equation:
+		x = np.linspace(options.range[0], options.range[1])
+		y = eval(options.equation)
+		ax.plot(x, y)
+
 	legend = []
 	for i, file in enumerate(files):
+		if file.lower() == "none":
+			continue
+
 
 		if options.legend_labels:
 			label = options.legend_labels + ' ' + str(i+1)
@@ -267,6 +278,9 @@ def main(files, options):
 			options.xlabel = 'Experiment Number'
 			options.style = 'scatter'
 
+		
+			
+
 
 
 		if options.differentiate:
@@ -288,6 +302,18 @@ def main(files, options):
 
 		else:
 			ax.plot(x,y, color=colors[i])
+
+		if options.integrate[0] != options.integrate[1]:
+			area = integrate(x, y, options.integrate)
+			_x = pd.DataFrame(x)
+			_y = pd.DataFrame(y)
+			rows = _x[0].between(options.integrate[0], options.integrate[1])
+			ax.fill_between(_x[0][rows], _y[0][rows], color='tab:gray', alpha=0.6, linewidth=0)
+
+			_, xmax = ax.get_xlim()
+			_, ymax = ax.get_ylim()
+			ax.text(xmax*0.85, ymax*0.85, f'area: {area}', ha='right', bbox=dict(boxstyle='round', ec=(0, 0, 0), fc=(0.95, 0.95, 0.95)))
+
 
 	ax.set_xlabel(options.xlabel)
 	ax.set_ylabel(options.ylabel)
@@ -328,7 +354,7 @@ def main(files, options):
 if __name__ == '__main__':
 
 	parser = argparse.ArgumentParser(description='Generate a quick plot of 2D data.')
-	parser.add_argument('data_files', nargs='+', help='Data files to plot')
+	parser.add_argument('data_files', nargs='+', default=[], help='Data files to plot')
 
 	parser.add_argument('-x', '--xlabel', type=str, help='x axis label', default='')
 	parser.add_argument('-y', '--ylabel', type=str, help='y axis label', default='')
@@ -370,12 +396,15 @@ if __name__ == '__main__':
 
 	# math stuff
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
-	parser.add_argument('--normalize_area', nargs=2, default=[0,0], type=float, help='normalize by and area between two points')
+	parser.add_argument('--normalize_area', nargs=2, default=[0,0], type=float, help='normalize by an area between two points')
 	parser.add_argument('--detrend', type=int, default=-1, help='fit and subtract polynomial function of degree {n} from whole domain')
 	parser.add_argument('--differentiate', type=int, default=0, help='plot {n}th degree derivative')
 	parser.add_argument('--polyfit', type=int, default=-1, help='fit {n}th degree polynomial')
 	parser.add_argument('--hide_poly_coef', action='store_false', help='hide text box with polynomial coefficients')
 	parser.add_argument('--peak_area_over_time', nargs=2, default=[0,0], type=float, help='integrate an area of data and plot area as time series')
+	parser.add_argument('--equation', help='equation to plot as f(x). Example: e^x. Specify --range')
+	parser.add_argument('--range', nargs=2, default=[-10, 10], type=float, help='range for custom --equation to be plotted over')
+	parser.add_argument('--integrate', nargs=2, default=[0,0], type=float, help='integrate an area of data between two points')
 
 	# pandas stuff
 	parser.add_argument('--pandas', nargs=2, default=['', ''], help='use pandas to read file, plots {column_label_1} vs {column_label_2}. Only way to read excel files')
