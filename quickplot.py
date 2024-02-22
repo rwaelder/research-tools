@@ -153,6 +153,9 @@ def ddx(x, y):
 
 def main(files, options):
 
+	if options.subtract_file:
+		x_bkgd, y_bkgd = read_2d_file(options.subtract_file, options.columns)
+
 	if options.sort_lambda:
 		sort_func = lambda file : float(eval(options.sort_lambda))
 		files.sort(key=sort_func)
@@ -163,10 +166,7 @@ def main(files, options):
 		title = options.title
 
 
-	try:
-		colorspace = matplotlib.colormaps.get_cmap(options.color)
-	except AttributeError:
-		colorspace = plt.get_cmap(options.color)
+	colorspace = matplotlib.colormaps.get_cmap(options.colormap)
 	colors = colorspace( np.linspace(0, 1, len(files)) )
 
 	if options.monochrome:
@@ -192,26 +192,26 @@ def main(files, options):
 		y = eval(options.equation)
 		ax.plot(x, y)
 
-	label = ''
+	legend = []
 	for i, file in enumerate(files):
 		if file.lower() == "none":
 			continue
 
 
 		if options.legend_labels:
-			if len(files) > 1:
-				label = options.legend_labels + ' ' + str(i+1)
-			else:
-				label = options.legend_labels
+			label = options.legend_labels + ' ' + str(i+1)
+			legend.append(label)
 
 		elif options.legend_lambda:
 			label = lambda file : eval(options.legend_lambda)
+			legend.append(label(file))
 		else:
 
 			# remove extension
-			label = '.'.join( file.split('.')[:-1] )
+			legendFilename = '.'.join( file.split('.')[:-1] )
 			# slice based on optional arguments
-			label = label[options.legend_start_cutoff:options.legend_end_cutoff]
+			legendFilename = legendFilename[options.legend_start_cutoff:options.legend_end_cutoff]
+			legend.append(legendFilename)
 
 		x = []
 		y = []
@@ -228,6 +228,8 @@ def main(files, options):
 			else:
 				x, y = read_2d_file(file, options.columns)
 
+		if options.subtract_file:
+			y = [_y - _y_bkgd for _y, _y_bkgd in zip(y, y_bkgd)]
 
 		if options.normalize:
 			y = normalize_data(y)
@@ -255,24 +257,24 @@ def main(files, options):
 		if options.polyfit > -1:
 
 			# fit polynomial
-			coefs, covs = np.polyfit(x, y, options.polyfit, cov=True)
+			coefs, cov = np.polyfit(x, y, options.polyfit, cov=True)
+			
 			y_poly = np.polyval(coefs, x)
 
+
+			ax.plot(x, y_poly, color='k')
+
+			coefs.reverse() # const. last
 			func_text = '$y = '
 			coefs_text = ''
-			for n, (coef, cov) in enumerate( zip( reversed(coefs), reversed(np.diagonal(covs)) )):
-				power = len(coefs) - n - 1
-				if power > 1:
+			for n, coef in enumerate(coefs):
+				power = len(coefs) - n
+				if power > 0:
 					func_text += '{c}x^{p} + '.format(c=string.ascii_lowercase[n], p=power)
-					coefs_text += '${c}$ = {val} ± {var}\n'.format(c=string.ascii_lowercase[n], val=round(coef, 8), var=round(cov, 8))
-				elif power == 1:
-					func_text += '{c}x + '.format(c=string.ascii_lowercase[n])
-					coefs_text += '${c}$ = {val} ± {var}\n'.format(c=string.ascii_lowercase[n], val=round(coef, 8), var=round(cov, 8))
+					coefs_text += '${c}$ = {val} ± {var}\n'.format(c=string.ascii_lowercase[n], val=round(coef, ))
 				else:
 					func_text += '{c}$'.format(c=string.ascii_lowercase[n])
-					coefs_text += '${c}$ = {val} ± {var}'.format(c=string.ascii_lowercase[n], val=round(coef, 8), var=round(cov, 8))
 
-			ax.plot(x, y_poly, color='k', label=func_text+'\n'+coefs_text)
 
 		if options.peak_area_over_time[0] != options.peak_area_over_time[1]:
 			area = integrate(x, y, options.peak_area_over_time)
@@ -295,16 +297,16 @@ def main(files, options):
 			y = offset_data(y, offset)
 
 		if options.style == '' or options.style.lower()[0] == 'line'[0]:
-			ax.plot(x,y, color=colors[i], label=label)
+			ax.plot(x,y, color=colors[i])
 
 		elif options.style.lower()[0] == 'scatter'[0]:
-			ax.scatter(x,y, marker=options.marker, color=colors[i], label=label)
+			ax.plot(x,y, marker=options.marker, color=colors[i])
 
 		elif options.style.lower()[0] == 'both'[0]:
-			ax.plot(x,y,'-o', marker=options.marker, color=colors[i], label=label)
+			ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
 
 		else:
-			ax.plot(x,y, color=colors[i], label=label)
+			ax.plot(x,y, color=colors[i])
 
 		if options.integrate[0] != options.integrate[1]:
 			area = integrate(x, y, options.integrate)
@@ -334,13 +336,8 @@ def main(files, options):
 	if options.ylim[0] != options.ylim[1]:
 		ax.set_ylim(options.ylim)
 
-	if not options.no_legend:
-		if options.legend_bbox[0] == options.legend_bbox[1] == -1:
-			fig.legend(ncol=options.legend_columns, loc=options.legend_loc)
-		else:
-			fig.legend(ncol=options.legend_columns, bbox_to_anchor=options.legend_bbox)
-
-
+	if len(legend) > 1 and not options.no_legend:
+		fig.legend(legend, ncol=options.legend_columns)
 
 	if options.tight:
 		fig.tight_layout()
@@ -380,7 +377,7 @@ if __name__ == '__main__':
 	parser.add_argument('--style', type=str, help='plot as line, scatter, or both', choices=['line', 'scatter', 'both'], default='line')
 	parser.add_argument('--marker', help='marker for scatter plot', default='o')
 	parser.add_argument('--offset', type=float, help='vertical offset between datasets', default=0)
-	parser.add_argument('--color', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
+	parser.add_argument('--colormap', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
 	parser.add_argument('--colors', type=str, nargs='+', help='specific colors to plot with specified individually', default=[])
 	parser.add_argument('--monochrome', action='store_true', help='force a single color for all elements')
 	parser.add_argument('--xkcd', action='store_true', help='xkcd styling')
@@ -392,8 +389,6 @@ if __name__ == '__main__':
 	parser.add_argument('--legend_lambda', type=str, help='specify a lambda {file} function to parse filenames for legend labels', default='')
 	parser.add_argument('--no_legend', action='store_true', help='don\'t display a legend')
 	parser.add_argument('--legend_columns', type=int, help='number of columns to use for legend', default=1)
-	parser.add_argument('--legend_loc', type=str, choices=['best', 'upper right', 'upper left', 'lower left', 'lower right', 'right', 'center left', 'center right', 'lower center', 'upper center', 'center'], help='Location string for legend placement', default='best')
-	parser.add_argument('--legend_bbox', type=float, nargs=2, help='values to pass to legend bbox_to_anchor; figure coordinates', default=[-1, -1])
 
 	# misc
 	parser.add_argument('--tight', action='store_true', help='use a tight layout')
@@ -415,6 +410,7 @@ if __name__ == '__main__':
 	parser.add_argument('--equation', help='equation to plot as f(x). Example: e^x. Specify --range')
 	parser.add_argument('--range', nargs=2, default=[-10, 10], type=float, help='range for custom --equation to be plotted over')
 	parser.add_argument('--integrate', nargs=2, default=[0,0], type=float, help='integrate an area of data between two points')
+	parser.add_argument('--subtract_file', type=str, help='subtract data from all others. Useful for backgrounds')
 
 	# pandas stuff
 	parser.add_argument('--pandas', nargs=2, default=['', ''], help='use pandas to read file, plots {column_label_1} vs {column_label_2}. Only way to read excel files')
