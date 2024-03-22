@@ -15,6 +15,8 @@ as command line arguments
 import argparse
 import numpy as np
 import pandas as pd
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 import string
 import sys
 
@@ -148,6 +150,18 @@ def ddx(x, y):
 
 	return dx, dy
 
+def baseline_als(y, lam, p, niter=10):
+	L = len(y)
+	D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
+	w = np.ones(L)
+	for i in range(niter):
+		W = sparse.spdiags(w, 0, L, L)
+		Z = W + lam *D.dot(D.transpose())
+		z = spsolve(Z, w*y)
+		w = p * (y > z) + (1-p) * (y < z)
+
+	return z
+
 
 # ---------- Main Program --------------------------------------
 
@@ -155,6 +169,11 @@ def main(files, options):
 
 	if options.subtract_file:
 		x_bkgd, y_bkgd = read_2d_file(options.subtract_file, options.columns)
+
+		if options.x_lambda:
+			x_bkgd = eval(options.x_lambda.replace('x', 'x_bkgd').replace('y', 'y_bkgd'))
+		if options.y_lambda:
+			y_bkgd = eval(options.y_lambda.replace('x', 'x_bkgd').replace('y', 'y_bkgd'))
 
 	if options.sort_lambda:
 		sort_func = lambda file : float(eval(options.sort_lambda))
@@ -182,7 +201,7 @@ def main(files, options):
 	if options.presentation:
 		plt.rc('font', size=13)
 		plt.rc('axes', labelsize=13)
-		plt.rc('lines', markersize=9, linewidth=2)
+		plt.rc('lines', markersize=9, linewidth=1.5)
 
 
 	fig, ax = plt.subplots()
@@ -198,19 +217,24 @@ def main(files, options):
 			continue
 
 
-		if options.legend_labels:
-			label = options.legend_labels + ' ' + str(i+1)
+		if options.legend_iterator:
+			label = options.legend_iterator + ' ' + str(i+1)
 			legend.append(label)
 
 		elif options.legend_lambda:
 			label = lambda file : eval(options.legend_lambda)
 			legend.append(label(file))
+		elif options.legend_labels:
+			try:
+				legend.append(options.legend_labels[i])
+			except IndexError:
+				legend.append('')
 		else:
 
 			# remove extension
 			legendFilename = '.'.join( file.split('.')[:-1] )
 			# slice based on optional arguments
-			legendFilename = legendFilename[options.legend_start_cutoff:options.legend_end_cutoff]
+			# legendFilename = legendFilename[options.legend_start_cutoff:options.legend_end_cutoff]
 			legend.append(legendFilename)
 
 		x = []
@@ -228,8 +252,20 @@ def main(files, options):
 			else:
 				x, y = read_2d_file(file, options.columns)
 
+		if options.x_lambda:
+			x = eval(options.x_lambda)
+
+		if options.y_lambda:
+			y = eval(options.y_lambda)
+
 		if options.subtract_file:
 			y = [_y - _y_bkgd for _y, _y_bkgd in zip(y, y_bkgd)]
+			x = x[:len(y)]
+
+		
+		if options.als_baseline:
+			lam, p = options.als_baseline
+			y = baseline_als(y, lam, p)
 
 		if options.normalize:
 			y = normalize_data(y)
@@ -279,8 +315,12 @@ def main(files, options):
 		if options.peak_area_over_time[0] != options.peak_area_over_time[1]:
 			area = integrate(x, y, options.peak_area_over_time)
 			y = area
-			x = i
-			options.xlabel = 'Experiment Number'
+			if options.time_series_x_lambda:
+				x = eval(options.time_series_x_lambda)
+			else:
+				x = i
+			if not options.xlabel:
+				options.xlabel = 'Experiment Number'
 			options.style = 'scatter'
 
 		
@@ -337,7 +377,7 @@ def main(files, options):
 		ax.set_ylim(options.ylim)
 
 	if len(legend) > 1 and not options.no_legend:
-		fig.legend(legend, ncol=options.legend_columns)
+		ax.legend(legend, ncol=options.legend_columns, loc=options.legend_loc)
 
 	if options.tight:
 		fig.tight_layout()
@@ -349,12 +389,12 @@ def main(files, options):
 		ax.set_yscale('log')
 
 
-	if options.save is None:
+	if options.savefile == '':
 		plt.show()
 
 	else:
 
-		fig.savefig(options.save, dpi=args.dpi)
+		fig.savefig(options.savefile, dpi=args.dpi)
 
 if __name__ == '__main__':
 
@@ -383,21 +423,21 @@ if __name__ == '__main__':
 	parser.add_argument('--xkcd', action='store_true', help='xkcd styling')
 
 	# legend stuff
-	parser.add_argument('--legend_labels', type=str, help='iterated labels to use in the legend for each dataset ', default='')
-	parser.add_argument('--legend_start_cutoff', type=int, help='character to start cutoff of filenames for legend', default=0)
-	parser.add_argument('--legend_end_cutoff', type=int, help='character to end cutoff of filenames for legend', default=-1)
+	parser.add_argument('--legend_iterator', type=str, help='iterated labels to use in the legend for each dataset ', default='')
+	# parser.add_argument('--legend_start_cutoff', type=int, help='character to start cutoff of filenames for legend', default=0)
+	# parser.add_argument('--legend_end_cutoff', type=int, help='character to end cutoff of filenames for legend', default=-1)
 	parser.add_argument('--legend_lambda', type=str, help='specify a lambda {file} function to parse filenames for legend labels', default='')
+	parser.add_argument('--legend_labels', type=str, nargs='+', help='specific labels for legend. Number of labels passed must be same as number of files')
 	parser.add_argument('--no_legend', action='store_true', help='don\'t display a legend')
 	parser.add_argument('--legend_columns', type=int, help='number of columns to use for legend', default=1)
+	parser.add_argument('--legend_loc', default='best', type=str, help='location of legend. Matplotlib legend location keyword')
 
 	# misc
 	parser.add_argument('--tight', action='store_true', help='use a tight layout')
 	parser.add_argument('--presentation', action='store_true', help='increase font size for use in slides')
-	parser.add_argument('--save', type=str, default=None, help='save plot as file, pdf format if not specified')
 	parser.add_argument('--inverse', action='store_true', help='flip x and y')
 	parser.add_argument('--columns', nargs=2, default=[0, 1], type=int, help='columns of data file to read, 0-indexed')
 	parser.add_argument('--sort_lambda', type=str, help='lambda {file} function to parse filenames to sort files', default='')
-	parser.add_argument('--dpi', type=int, default=300, help='dpi of saved figure if using --save {figname}')
 
 	# math stuff
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
@@ -407,14 +447,23 @@ if __name__ == '__main__':
 	parser.add_argument('--polyfit', type=int, default=-1, help='fit {n}th degree polynomial')
 	parser.add_argument('--hide_poly_coef', action='store_false', help='hide text box with polynomial coefficients')
 	parser.add_argument('--peak_area_over_time', nargs=2, default=[0,0], type=float, help='integrate an area of data and plot area as time series')
+	parser.add_argument('--time_series_x_lambda', type=str, help='lambda {file} function to parse filename for x value in time series integral')
 	parser.add_argument('--equation', help='equation to plot as f(x). Example: e^x. Specify --range')
 	parser.add_argument('--range', nargs=2, default=[-10, 10], type=float, help='range for custom --equation to be plotted over')
 	parser.add_argument('--integrate', nargs=2, default=[0,0], type=float, help='integrate an area of data between two points')
 	parser.add_argument('--subtract_file', type=str, help='subtract data from all others. Useful for backgrounds')
+	parser.add_argument('--als_baseline', type=float, nargs=2, help='asymmetric least squares baselining. Args LAMBDA and P')
+	parser.add_argument('--x_lambda', help='lambda {data} to process x data. data stored as list')
+	parser.add_argument('--y_lambda', help='lambda {data} to process y data. data stored as list')
+
 
 	# pandas stuff
 	parser.add_argument('--pandas', nargs=2, default=['', ''], help='use pandas to read file, plots {column_label_1} vs {column_label_2}. Only way to read excel files')
 
+
+	# saving stuff
+	parser.add_argument('--savefile', default='', help='filename to save plot')
+	parser.add_argument('--dpi', type=int, default=300, help='dpi to save image formats')
 
 
 	args = parser.parse_args()
