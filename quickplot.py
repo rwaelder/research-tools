@@ -93,7 +93,7 @@ def pandas_read_file(filename, column_labels):
 	if '.xlsx' in filename or '.xls' in filename:
 		datafile = pd.read_excel(filename).dropna()
 	elif '.csv' in filename:
-		datafile = pd.read_csv(filename).dropna()
+		datafile = pd.read_csv(filename)
 	elif '.txt' in filename:
 		#TODO
 		print('txt not yet supported')
@@ -241,7 +241,10 @@ def main(files, options):
 		y = []
 
 		if options.pandas[0] != '':
-			x, y, = pandas_read_file(file, options.pandas)
+			if options.inverse:
+				y, x = pandas_read_file(file, options.pandas)
+			else:
+				x, y, = pandas_read_file(file, options.pandas)
 
 		else:
 			if file[-4:] == '.wdf':
@@ -293,28 +296,62 @@ def main(files, options):
 		if options.polyfit > -1:
 
 			# fit polynomial
-			coefs, cov = np.polyfit(x, y, options.polyfit, cov=True)
+			coefs, covs = np.polyfit(x, y, options.polyfit, cov=True)
+			# print(cov.shape)
 			
 			y_poly = np.polyval(coefs, x)
 
 
 			ax.plot(x, y_poly, color='k')
-
-			coefs.reverse() # const. last
-			func_text = '$y = '
-			coefs_text = ''
-			for n, coef in enumerate(coefs):
-				power = len(coefs) - n
-				if power > 0:
-					func_text += '{c}x^{p} + '.format(c=string.ascii_lowercase[n], p=power)
-					coefs_text += '${c}$ = {val} ± {var}\n'.format(c=string.ascii_lowercase[n], val=round(coef, ))
+			# coefs = list(coefs)
+			# coefs.reverse() # const. last
+			func_text = r'$y = '
+			coefs_text = r''
+			for n, (val, var) in enumerate(zip(coefs, covs.diagonal())):
+				power = len(coefs) - 1 - n
+				letter = string.ascii_lowercase[n]
+				if power > 1:
+					func_text += f'{letter}x^{power} + '
+					coefs_text += f'${letter}$ = {val:.7e} ± {var:.7e}\n'
+				elif power == 1:
+					func_text += f'{letter}x + '
+					coefs_text += f'${letter}$ = {val:.7e} ± {var:.7e}\n'
 				else:
-					func_text += '{c}$'.format(c=string.ascii_lowercase[n])
+					func_text += f'{letter}$'
+					coefs_text += f'${letter}$ = {val:.7e} ± {var:.7e}'
+
+			fit_text = func_text + '\n' + coefs_text
+			if 'top' in options.poly_coef_loc:
+				text_y = 0.98
+				va = 'top'
+			elif 'bottom' in options.poly_coef_loc:
+				text_y = 0.02
+				va = 'bottom'
+			elif 'center' in options.poly_coef_loc:
+				text_y = 0.5
+				va = 'center'
+			if 'left' in options.poly_coef_loc:
+				text_x = 0.02
+				ha = 'left'
+			elif 'right' in options.poly_coef_loc:
+				text_x = 0.98
+				ha = 'right'
+			ax.text(text_x, text_y, fit_text, ha=ha, va=va, transform=ax.transAxes, bbox={'boxstyle': 'round', 'fc': (0.98, 0.98, 0.98), 'alpha' : 0.5})
+			# fig.text(0.98, 0.96, coefs_text, ha='right', va='top')
+			# print(func_text)
+			# print(coefs_text)
 
 
 		if options.peak_area_over_time[0] != options.peak_area_over_time[1]:
 			area = integrate(x, y, options.peak_area_over_time)
 			y = area
+
+			if options.time_series_normalize and i == 0:
+				norm_area = area
+			elif i == 0:
+				norm_area = 1
+
+			y /= norm_area
 			if options.time_series_x_lambda:
 				x = eval(options.time_series_x_lambda)
 			else:
@@ -340,7 +377,7 @@ def main(files, options):
 			ax.plot(x,y, color=colors[i])
 
 		elif options.style.lower()[0] == 'scatter'[0]:
-			ax.plot(x,y, marker=options.marker, color=colors[i])
+			ax.plot(x,y, f'{options.marker}', color=colors[i])
 
 		elif options.style.lower()[0] == 'both'[0]:
 			ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
@@ -445,9 +482,11 @@ if __name__ == '__main__':
 	parser.add_argument('--detrend', type=int, default=-1, help='fit and subtract polynomial function of degree {n} from whole domain')
 	parser.add_argument('--differentiate', type=int, default=0, help='plot {n}th degree derivative')
 	parser.add_argument('--polyfit', type=int, default=-1, help='fit {n}th degree polynomial')
+	parser.add_argument('--poly_coef_loc', choices=['topright', 'topleft', 'bottomright', 'bottomleft', 'centerright', 'centerleft'], default='topright', help='location to draw fit parameters')
 	parser.add_argument('--hide_poly_coef', action='store_false', help='hide text box with polynomial coefficients')
 	parser.add_argument('--peak_area_over_time', nargs=2, default=[0,0], type=float, help='integrate an area of data and plot area as time series')
 	parser.add_argument('--time_series_x_lambda', type=str, help='lambda {file} function to parse filename for x value in time series integral')
+	parser.add_argument('--time_series_normalize', action='store_true', help='normalize peak area. First area = 1')
 	parser.add_argument('--equation', help='equation to plot as f(x). Example: e^x. Specify --range')
 	parser.add_argument('--range', nargs=2, default=[-10, 10], type=float, help='range for custom --equation to be plotted over')
 	parser.add_argument('--integrate', nargs=2, default=[0,0], type=float, help='integrate an area of data between two points')
