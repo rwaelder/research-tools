@@ -89,11 +89,14 @@ def is_number(value):
 	except ValueError:
 		return False
 
-def pandas_read_file(filename, column_labels):
+def pandas_read_file(filename, args):
+	column_labels = args.pandas
+	skiprows = eval(args.skiprows)
+
 	if '.xlsx' in filename or '.xls' in filename:
-		datafile = pd.read_excel(filename).dropna()
+		datafile = pd.read_excel(filename, skiprows=skiprows)
 	elif '.csv' in filename:
-		datafile = pd.read_csv(filename)
+		datafile = pd.read_csv(filename, skiprows=skiprows)
 	elif '.txt' in filename:
 		#TODO
 		print('txt not yet supported')
@@ -101,8 +104,18 @@ def pandas_read_file(filename, column_labels):
 
 	x = datafile[column_labels[0]].tolist()
 	y = datafile[column_labels[1]].tolist()
+	if args.color_col:
+		c = datafile[args.color_col].tolist()
+	else:
+		c = None
 
-	return x, y
+	if args.xdate:
+		x = pd.to_datetime(x, format=args.xdate)
+	if args.ydate:
+		y = pd.to_datetime(y, format=args.ydate)
+
+	return x, y, c
+
 
 def wire_read_file(filename):
 	try:
@@ -242,9 +255,9 @@ def main(files, options):
 
 		if options.pandas[0] != '':
 			if options.inverse:
-				y, x = pandas_read_file(file, options.pandas)
+				y, x, c = pandas_read_file(file, options)
 			else:
-				x, y, = pandas_read_file(file, options.pandas)
+				x, y, c = pandas_read_file(file, options)
 
 		else:
 			if file[-4:] == '.wdf':
@@ -361,7 +374,7 @@ def main(files, options):
 			options.style = 'scatter'
 
 		
-			
+		
 
 
 
@@ -369,15 +382,64 @@ def main(files, options):
 			for n in range(options.differentiate):
 				x, y, = ddx(x, y)
 
+		if options.wherex:
+			where = lambda data: eval(options.wherex)
+			rows = [j for j, data in enumerate(x) if where(data)]
+			_x, _y = [], []
+			if c is not None:
+				_c = []
+			for row in rows:
+				_x.append(x[row])
+				_y.append(y[row])
+				if c is not None:
+					_c.append(c[row])
+			x = _x
+			y = _y
+			if c is not None:
+				c = _c
+
+		if options.wherey:
+			where = lambda data: eval(options.wherey)
+			rows = [j for j, data in enumerate(y) if where(data)]
+			_x, _y = [], []
+			if c is not None:
+				_c = []
+			for row in rows:
+				_x.append(x[row])
+				_y.append(y[row])
+				if c is not None:
+					_c.append(c[row])
+			x = _x
+			y = _y
+			if c is not None:
+				c = _c
+
+		if options.wherec:
+			where = lambda data: eval(options.wherec)
+			rows = [j for j, data in enumerate(c) if where(data)]
+			_x, _y, _c = [], [], []
+			for row in rows:
+				_x.append(x[row])
+				_y.append(y[row])
+				_c.append(c[row])
+			x = _x
+			y = _y
+			c = _c
+
 		if options.offset != 0:
 			offset = options.offset * i
 			y = offset_data(y, offset)
 
+		sc = None
 		if options.style == '' or options.style.lower()[0] == 'line'[0]:
 			ax.plot(x,y, color=colors[i])
 
 		elif options.style.lower()[0] == 'scatter'[0]:
-			ax.plot(x,y, f'{options.marker}', color=colors[i])
+			if options.color_col:
+				sc = ax.scatter(x, y, c=c, marker=options.marker, cmap=options.colormap)
+			else:
+				ax.scatter(x,y, marker=options.marker, color=colors[i])
+				sc = None
 
 		elif options.style.lower()[0] == 'both'[0]:
 			ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
@@ -397,8 +459,28 @@ def main(files, options):
 			ax.text(xmax*0.85, ymax*0.85, f'area: {area}', ha='right', bbox=dict(boxstyle='round', ec=(0, 0, 0), fc=(0.95, 0.95, 0.95)))
 
 
-	ax.set_xlabel(options.xlabel)
-	ax.set_ylabel(options.ylabel)
+	if options.hlines:
+		for line in options.hlines:
+			ax.axhline(y=line, color='k', linestyle=options.hline_style)
+
+	if options.vlines:
+		for line in options.vlines:
+			ax.axvline(x=line, color='k', linestyle=options.vline_style)
+
+	if sc is not None:
+		cbar = fig.colorbar(sc, ax=ax)
+		if options.colorbar_label:
+			cbar.set_label(options.colorbar_label)
+		else:
+			cbar.set_label(options.color_col)
+
+	if options.pandas[0] != '':
+		ax.set_xlabel(options.pandas[0])
+		ax.set_ylabel(options.pandas[1])
+	if options.xlabel:
+		ax.set_xlabel(options.xlabel)
+	if options.ylabel:
+		ax.set_ylabel(options.ylabel)
 
 	if not options.no_title:
 		ax.set_title(title)
@@ -416,8 +498,11 @@ def main(files, options):
 	if len(legend) > 1 and not options.no_legend:
 		ax.legend(legend, ncol=options.legend_columns, loc=options.legend_loc)
 
-	if options.tight:
-		fig.tight_layout()
+	# if options.tight:
+	fig.tight_layout()
+
+	if options.subfig_label:
+		fig.text(0.02, 0.98, options.subfig_label, va='top', fontsize='x-large')
 
 
 	if options.logx:
@@ -452,12 +537,14 @@ if __name__ == '__main__':
 	parser.add_argument('--title', type=str, help='plot title', default='')
 	parser.add_argument('--no_title', action='store_true', help='force no title on plot')
 	parser.add_argument('--style', type=str, help='plot as line, scatter, or both', choices=['line', 'scatter', 'both'], default='line')
+	parser.add_argument('--scatter', action='store_true', help='equivalent to --style scatter')
 	parser.add_argument('--marker', help='marker for scatter plot', default='o')
 	parser.add_argument('--offset', type=float, help='vertical offset between datasets', default=0)
 	parser.add_argument('--colormap', type=str, help='color palette for plots. see https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html', default='gist_rainbow')
 	parser.add_argument('--colors', type=str, nargs='+', help='specific colors to plot with specified individually', default=[])
 	parser.add_argument('--monochrome', action='store_true', help='force a single color for all elements')
 	parser.add_argument('--xkcd', action='store_true', help='xkcd styling')
+	parser.add_argument('--subfig_label', type=str, help='label for subfigure')
 
 	# legend stuff
 	parser.add_argument('--legend_iterator', type=str, help='iterated labels to use in the legend for each dataset ', default='')
@@ -475,6 +562,11 @@ if __name__ == '__main__':
 	parser.add_argument('--inverse', action='store_true', help='flip x and y')
 	parser.add_argument('--columns', nargs=2, default=[0, 1], type=int, help='columns of data file to read, 0-indexed')
 	parser.add_argument('--sort_lambda', type=str, help='lambda {file} function to parse filenames to sort files', default='')
+	parser.add_argument('--hlines', nargs='+', type=float, help='draw horizontal lines at locations')
+	parser.add_argument('--hline_style', type=str, default='-', help='pyplot style for hlines')
+	parser.add_argument('--vlines', nargs='+', type=float, help='draw vertical lines at locations')
+	parser.add_argument('--vline_style', type=str, default='-', help='pyplot style for vlines')
+
 
 	# math stuff
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
@@ -494,18 +586,32 @@ if __name__ == '__main__':
 	parser.add_argument('--als_baseline', type=float, nargs=2, help='asymmetric least squares baselining. Args LAMBDA and P')
 	parser.add_argument('--x_lambda', help='lambda {data} to process x data. data stored as list')
 	parser.add_argument('--y_lambda', help='lambda {data} to process y data. data stored as list')
+	parser.add_argument('--wherex', help='lambda {data} only plot points where this operation on x evaluates true')
+	parser.add_argument('--wherey', help='lambda {data} only plot points where this operation on y evaluates true')
+	parser.add_argument('--wherec', help='lambda {data} only plot points where this operation on c evaluates true')
 
 
 	# pandas stuff
 	parser.add_argument('--pandas', nargs=2, default=['', ''], help='use pandas to read file, plots {column_label_1} vs {column_label_2}. Only way to read excel files')
-
+	parser.add_argument('--skiprows', default='[]', help='stuff to get passed to pandas skiprows argument. must be valid python')
+	parser.add_argument('--xdate', default='', help='strftime string to parse x data as dates')
+	parser.add_argument('--ydate', default='', help='strftime string to parse y data as dates')
+	parser.add_argument('--color_col', default='', help='column label to use for scatter color. Must use pandas')
+	parser.add_argument('--colorbar_label', help='label for colorbar')
 
 	# saving stuff
 	parser.add_argument('--savefile', default='', help='filename to save plot')
+	parser.add_argument('--savefig', default='', help='alternate alias for savefile')
 	parser.add_argument('--dpi', type=int, default=300, help='dpi to save image formats')
 
 
 	args = parser.parse_args()
+
+	if args.savefig:
+		args.savefile = args.savefig
+
+	if args.scatter:
+		args.style = 'scatter'
 
 	files = args.data_files
 
