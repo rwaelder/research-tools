@@ -13,7 +13,9 @@ as command line arguments
 '''
 
 import argparse
+import glob
 import numpy as np
+import os
 import pandas as pd
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
@@ -27,6 +29,14 @@ import matplotlib
 
 
 # ---------- Helper functions ----------------------------------
+
+def find_files(pattern):
+	if '~' in pattern:
+		pattern = pattern.replace('~', os.environ['HOME'])
+
+	files = glob.glob(pattern)
+
+	return files
 
 def read_2d_file(filename, columns):
 	x_col, y_col = columns
@@ -606,6 +616,9 @@ if __name__ == '__main__':
 
 
 	args = parser.parse_args()
+
+	if '*' in args.data_files[0] or '?' in args.data_files[0]:
+		args.data_files = find_files(args.data_files[0])
 
 	if args.savefig:
 		args.savefile = args.savefig

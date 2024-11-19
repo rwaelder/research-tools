@@ -3,10 +3,17 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import landscape, letter
 from PIL import Image
 from datetime import datetime
+import glob, os
 
 
 
+def find_files(pattern):
+	if '~' in pattern:
+		pattern = pattern.replace('~', os.environ['HOME'])
 
+	files = glob.glob(pattern)
+
+	return files
 
 
 
@@ -98,6 +105,9 @@ if __name__ == '__main__':
 	# parser.add_argument('--scaling', choices=['fit', 'fill', ''])
 
 	args = parser.parse_args()
+
+	if '*' in args.figures[0] or '?' in args.figures[0]:
+		args.figures = find_files(args.figures[0])
 
 	if args.title and args.outfile == 'quickdeck_output.pdf':
 		args.outfile = args.title
