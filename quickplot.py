@@ -159,7 +159,7 @@ def integrate(x, y, _range):
 
 	rows = _x[0].between(start, end)
 
-	area = np.trapz(_y[0][rows], x=_x[0][rows])
+	area = np.trapezoid(_y[0][rows], x=_x[0][rows])
 
 	return area
 
@@ -441,21 +441,24 @@ def main(files, options):
 			y = offset_data(y, offset)
 
 		sc = None
-		if options.style == '' or options.style.lower()[0] == 'line'[0]:
-			ax.plot(x,y, color=colors[i])
+		match options.style:
+			case 'line':
+				ax.plot(x,y, color=colors[i])
 
-		elif options.style.lower()[0] == 'scatter'[0]:
-			if options.color_col:
-				sc = ax.scatter(x, y, c=c, marker=options.marker, cmap=options.colormap)
-			else:
-				ax.scatter(x,y, marker=options.marker, color=colors[i])
-				sc = None
+			case 'scatter':
+				if options.color_col:
+					sc = ax.scatter(x, y, c=c, marker=options.marker, cmap=options.colormap)
+				else:
+					ax.scatter(x,y, marker=options.marker, color=colors[i])
+					sc = None
 
-		elif options.style.lower()[0] == 'both'[0]:
-			ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
+			case 'both':
+				ax.plot(x,y,'-o', marker=options.marker, color=colors[i])
 
-		else:
-			ax.plot(x,y, color=colors[i])
+			case 'bar':
+				ax.bar(x, y)
+			case _:
+				ax.plot(x,y, color=colors[i])
 
 		if options.integrate[0] != options.integrate[1]:
 			area = integrate(x, y, options.integrate)
@@ -546,7 +549,7 @@ if __name__ == '__main__':
 
 	parser.add_argument('--title', type=str, help='plot title', default='')
 	parser.add_argument('--no_title', action='store_true', help='force no title on plot')
-	parser.add_argument('--style', type=str, help='plot as line, scatter, or both', choices=['line', 'scatter', 'both'], default='line')
+	parser.add_argument('--style', type=str, help='choose plot style', choices=['line', 'scatter', 'both', 'bar'], default='line')
 	parser.add_argument('--scatter', action='store_true', help='equivalent to --style scatter')
 	parser.add_argument('--marker', help='marker for scatter plot', default='o')
 	parser.add_argument('--offset', type=float, help='vertical offset between datasets', default=0)
@@ -576,7 +579,7 @@ if __name__ == '__main__':
 	parser.add_argument('--hline_style', type=str, default='-', help='pyplot style for hlines')
 	parser.add_argument('--vlines', nargs='+', type=float, help='draw vertical lines at locations')
 	parser.add_argument('--vline_style', type=str, default='-', help='pyplot style for vlines')
-
+	parser.add_argument('--raman_plot', action='store_true', help='setup x and y axes for Raman Shift plot')
 
 	# math stuff
 	parser.add_argument('--normalize', action='store_true', help='normalize all data to max of 1')
@@ -625,6 +628,20 @@ if __name__ == '__main__':
 
 	if args.scatter:
 		args.style = 'scatter'
+
+	normalized = False
+	if args.normalize or args.normalize_area[0] != args.normalize_area[1]:
+		normalized = True
+
+	if args.raman_plot:
+		args.xlabel = 'Raman Shift [cm$^{-1}$]'
+		if normalized:
+			args.ylabel = 'Normalized Intensity'
+		else:
+			args.ylabel = 'Intensity'
+
+	if args.offset != 0:
+		args.no_yticks = True
 
 	files = args.data_files
 
